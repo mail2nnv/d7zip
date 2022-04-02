@@ -1,7 +1,5 @@
-Fragment of main.html  <!-- body { color: #000000; background-color: #FFFFFF; } .pas1-assembler { background-color: #FFFFFF; color: #000000; } .pas1-character { background-color: #FFFFFF; color: #000080; } .pas1-comment { background-color: #FFFFFF; color: #000080; font-style: italic; } .pas1-float { background-color: #FFFFFF; color: #000080; } .pas1-hexadecimal { background-color: #FFFFFF; color: #000080; } .pas1-identifier { background-color: #FFFFFF; color: #000000; } .pas1-number { background-color: #FFFFFF; color: #000080; } .pas1-preprocessor { background-color: #FFFFFF; color: #000080; font-style: italic; } .pas1-reservedword { background-color: #FFFFFF; color: #000000; font-weight: bold; } .pas1-space { background-color: #FFFFFF; color: #000000; } .pas1-string { background-color: #FFFFFF; color: #000080; } .pas1-symbol { background-color: #FFFFFF; color: #000000; } -->
-
-> 7-zip Delphi API
-> ================
+7-zip Delphi API
+================
 
 This API use the 7-zip dll (7z.dll) to read and write all 7-zip supported archive formats.
 
@@ -62,6 +60,13 @@ Reading archive:
       with CreateInArchive(CLSID_CFormat7z) do  
       begin    
         OpenFile('c:\test.7z');
+        // items must be sorted by index!
+        items[0] := 0;
+        items[1] := 1;
+        items[2] := 2;
+        ExtractItems(@items, Length(items), false, nil, GetStreamCallBack);
+      end;
+    end;        
 ```
 
 ### Open stream
@@ -98,14 +103,30 @@ Reading archive:
 
 ### Password
 ```
-     function PasswordCallback(sender: Pointer; var password: WideString): HRESULT; stdcall; 
+     function PasswordCallback(sender: Pointer; var password: WideString): HRESULT; stdcall;
      begin
+       // call a dialog box ...
+       password := 'password';
+       Result := S_OK;
+     end;
+     procedure TMainForm.ExtractClick(Sender: TObject);
+     begin
+       with CreateInArchive(CLSID_CFormatZip) do
+       begin
+         // using callback
+         SetPasswordCallback(nil, PasswordCallback);
+         // or setting password directly
+         SetPassword('password');
+         OpenFile('c:\test.zip');
+         ...
+       end;
+     end;
 ```
 
 Writing archive
 ---------------
 ```
-     procedure TMainForm.ExtractAllClick(Sender: TObject); 
+     procedure TMainForm.CreateArchiveClick(Sender: TObject); 
      var   
        Arch: I7zOutArchive; 
      begin   
