@@ -109,6 +109,7 @@ Reading archive:
        password := 'password';
        Result := S_OK;
      end;
+     
      procedure TMainForm.ExtractClick(Sender: TObject);
      begin
        with CreateInArchive(CLSID_CFormatZip) do
