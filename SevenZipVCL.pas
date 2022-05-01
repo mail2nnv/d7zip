@@ -46,6 +46,7 @@ type
     FExtrBaseDir: Widestring;
     FFiles: TWideStringList;
     FLastError: Integer;
+    FLib: Integer;
     FPassword: WideString;
     FOnExtractfile: T7zextractfileEvent;
     FOnProgress: T7zProgressEvent;
@@ -110,6 +111,33 @@ const
 
        );                                                      //FHO 21.01.2007
 
+
+{$R 7z.res}
+
+{ Extract7zLibFile: Проверить наличие в указанной папке 7z.dll. 
+  Если ее там нет, извлечь из ресурса и сохранить ее в этой папке }
+function Extract7zLibFile(const DstDir: string = ''): Boolean;
+
+{ Load7zLib: Загрузить библиотеку 7z.dll в память процесса.
+
+  Если библиотека 7z.dll уже загружена, то просто увеличит счетчик ее 
+  использования, как при повторном вызове LoadLibrary.
+  
+  В противном случае будет искать библиотеку в каталоге исполняемого файла.
+  Если найдена в нем, то загрузит ее оттуда.
+  
+  В противном случае  извлечет ее из ресурса во временный каталог (который 
+  автоматически будет удален при выходе из приложения) и загрузит ее 
+  в память процесса вызовом LoadLibrary. 
+
+  Возвращает в результате Handle загруженной библиотеки, в необязательном 
+  параметре ALibPath путь к файлу библиотеки.
+
+  Каждому вызову Load7zLib должен соответствовать свой 
+  вызов FreeLibrary }
+function Load7zLib(var ALibPath: string): Integer; overload;
+function Load7zLib: Integer; overload;
+
 implementation
 
 uses
@@ -131,16 +159,13 @@ begin
       Sz.OnPreProgress(Sz, Value);
   end
   else
-  begin
     if Assigned(Sz.OnProgress) then 
     begin
       Sz.OnProgress(Sz, '', Value, 0);
       if Sz.FCanceled then
         Result := S_FALSE;
     end;
-  end;
 end;
-
 
 { TSevenZip }
 
@@ -185,7 +210,7 @@ begin
     end;
   end
   else
-    A.AddFiles(AddRootDir, '', SAnyFileMask, AddRecurseDirs in AddOptions);
+    A.AddFiles(AddRootDir, '', SAnyFileMask, AddRecurseDirs in AddOptions, True);
 
   Result := A.BatchSize;
 
@@ -199,7 +224,7 @@ end;
 
 constructor TSevenZip.Create(AOwner: TComponent);
 begin
-  Load7zLibFromResource;
+  FLib := Load7zLib;
   
   inherited;
   FFiles := TWideStringList.Create;
@@ -207,6 +232,11 @@ end;
 
 destructor TSevenZip.Destroy;
 begin
+  if FLib <> 0 then
+  begin
+    FreeLibrary(FLib);
+    FLib := 0;
+  end;
   FreeAndNil(FFiles);
   inherited;
 end;
@@ -238,6 +268,106 @@ end;
 procedure TWideStringList.AddString(const S: WideString);
 begin
   Add(S);
+end;
+
+//——————————————————————————————————————————————————————————————————————————————
+
+const
+  SResName = '7zip_library';
+  
+function Extract7zLibFile(const DstDir: string): Boolean;
+var
+  MemStream: TResourceStream;
+  S: string;
+begin
+  Result := True;
+  
+  S := DstDir;
+  if S = '' then
+    S := ExtractFilePath(ParamStr(0));
+
+  S := AddBk(S) + C_7zDllName;
+
+  if FileExists(S) then
+    Exit;
+
+  MemStream := TResourceStream.Create(HInstance, SResName, RT_RCDATA);
+  try
+    MemStream.SaveToFile(S);
+  finally
+    MemStream.Free;
+  end;
+
+  Result := FileExists(S);
+end;
+
+var
+  __TempLibDir: string = '';
+
+procedure DeleteTempLibDir; far;
+var
+  H: Integer;
+  Path: packed array [0..MAX_PATH] of Char;
+begin
+  if __TempLibDir <> '' then
+  begin
+    H := GetModuleHandle(C_7zDllName);
+    if H <> 0 then
+    begin
+      GetModuleFileName(H, @Path, MAX_PATH);
+      if SamePath(__TempLibDir, ExtractFileDir(StrPas(@Path))) then
+        FreeLibrary(H);
+    end;
+
+    if SafeDeleteFile(__TempLibDir + C_7zDllName) then
+    begin
+      DeleteTempDirectory(__TempLibDir);
+      __TempLibDir := '';
+    end;
+  end;
+end;
+
+function Load7zLib(var ALibPath: string): Integer;
+var
+  Path: packed array [0..MAX_PATH] of Char;
+begin
+  { 1. Ищем среди уже загруженных }
+  Result := GetModuleHandle(C_7zDllName);
+  if Result <> 0 then
+  begin
+    Result := SafeLoadLibrary(C_7zDllName); // увеличиваем счетчик использования
+    GetModuleFileName(Result, @Path, MAX_PATH);
+    ALibPath := StrPas(@Path);
+    Exit;
+  end;
+
+  { 2. Ищем рядом с исполняемым файлом }
+  ALibPath := AddBk(ExtractFileDir(ParamStr(0))) + C_7zDllName;
+  if FileExists(ALibPath) then
+  begin
+    Result := SafeLoadLibrary(PChar(ALibPath));
+    Exit;
+  end;
+  
+  { 3. Извлекаем из ресурса во временный кататло и грузим оттуда }
+  if __TempLibDir = '' then
+  begin
+    __TempLibDir := CreateTempDirectory(True);
+    AddExitProc(DeleteTempLibDir);
+  end;
+
+  if Extract7zLibFile(__TempLibDir) then
+  begin
+    ALibPath := __TempLibDir + C_7zDllName;
+    Result := SafeLoadLibrary(PChar(ALibPath));
+  end;
+end;
+
+function Load7zLib: Integer; 
+var
+  TempLibPath: string;
+begin
+  Result := Load7zLib(TempLibPath);
 end;
 
 end.
